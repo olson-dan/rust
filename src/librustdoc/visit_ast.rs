@@ -149,7 +149,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
         Enum {
             name,
             variants: def.variants.iter().map(|v| Variant {
-                name: v.node.name,
+                name: v.node.ident.name,
                 attrs: v.node.attrs.clone(),
                 stab: self.stability(v.node.data.id()),
                 depr: self.deprecation(v.node.data.id()),
@@ -273,7 +273,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
     fn maybe_inline_local(&mut self,
                           id: ast::NodeId,
                           def: Def,
-                          renamed: Option<ast::Name>,
+                          renamed: Option<ast::Ident>,
                           glob: bool,
                           om: &mut Module,
                           please_inline: bool) -> bool {
@@ -367,14 +367,14 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                 om.foreigns.push(hir::ForeignMod {
                     abi: tcx.hir().get_foreign_abi(it.id),
                     items: vec![hir::ForeignItem {
-                        name: renamed.unwrap_or(it.name),
+                        ident: renamed.unwrap_or(it.ident),
                         .. it.clone()
                     }].into(),
                 });
                 true
             }
             Node::MacroDef(def) if !glob => {
-                om.macros.push(self.visit_local_macro(def, renamed));
+                om.macros.push(self.visit_local_macro(def, renamed.map(|i| i.name)));
                 true
             }
             _ => false,
@@ -384,9 +384,9 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
     }
 
     pub fn visit_item(&mut self, item: &hir::Item,
-                      renamed: Option<ast::Name>, om: &mut Module) {
+                      renamed: Option<ast::Ident>, om: &mut Module) {
         debug!("Visiting item {:?}", item);
-        let name = renamed.unwrap_or(item.name);
+        let ident = renamed.unwrap_or(item.ident);
 
         if item.vis.node.is_pub() {
             let def_id = self.cx.tcx.hir().local_def_id(item.id);
@@ -413,7 +413,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                 om.extern_crates.push(ExternCrate {
                     cnum: self.cx.tcx.extern_mod_stmt_cnum(def_id)
                                 .unwrap_or(LOCAL_CRATE),
-                    name,
+                    name: ident.name,
                     path: orig_name.map(|x|x.to_string()),
                     vis: item.vis.clone(),
                     attrs: item.attrs.clone(),
@@ -442,10 +442,10 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                             _ => false,
                         }
                     });
-                    let name = if is_glob { None } else { Some(name) };
+                    let ident = if is_glob { None } else { Some(ident) };
                     if self.maybe_inline_local(item.id,
                                                path.def,
-                                               name,
+                                               ident,
                                                is_glob,
                                                om,
                                                please_inline) {
@@ -454,7 +454,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                 }
 
                 om.imports.push(Import {
-                    name,
+                    name: ident.name,
                     id: item.id,
                     vis: item.vis.clone(),
                     attrs: item.attrs.clone(),
@@ -469,21 +469,21 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                                                      item.vis.clone(),
                                                      item.id,
                                                      m,
-                                                     Some(name)));
+                                                     Some(ident.name)));
             },
             hir::ItemKind::Enum(ref ed, ref gen) =>
-                om.enums.push(self.visit_enum_def(item, name, ed, gen)),
+                om.enums.push(self.visit_enum_def(item, ident.name, ed, gen)),
             hir::ItemKind::Struct(ref sd, ref gen) =>
-                om.structs.push(self.visit_variant_data(item, name, sd, gen)),
+                om.structs.push(self.visit_variant_data(item, ident.name, sd, gen)),
             hir::ItemKind::Union(ref sd, ref gen) =>
-                om.unions.push(self.visit_union_data(item, name, sd, gen)),
+                om.unions.push(self.visit_union_data(item, ident.name, sd, gen)),
             hir::ItemKind::Fn(ref fd, header, ref gen, body) =>
-                self.visit_fn(om, item, name, &**fd, header, gen, body),
+                self.visit_fn(om, item, ident.name, &**fd, header, gen, body),
             hir::ItemKind::Ty(ref ty, ref gen) => {
                 let t = Typedef {
                     ty: ty.clone(),
                     gen: gen.clone(),
-                    name,
+                    name: ident.name,
                     id: item.id,
                     attrs: item.attrs.clone(),
                     whence: item.span,
@@ -496,7 +496,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
             hir::ItemKind::Existential(ref exist_ty) => {
                 let t = Existential {
                     exist_ty: exist_ty.clone(),
-                    name,
+                    name: ident.name,
                     id: item.id,
                     attrs: item.attrs.clone(),
                     whence: item.span,
@@ -512,7 +512,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                     mutability: mut_.clone(),
                     expr: exp.clone(),
                     id: item.id,
-                    name,
+                    name: ident.name,
                     attrs: item.attrs.clone(),
                     whence: item.span,
                     vis: item.vis.clone(),
@@ -526,7 +526,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                     type_: ty.clone(),
                     expr: exp.clone(),
                     id: item.id,
-                    name,
+                    name: ident.name,
                     attrs: item.attrs.clone(),
                     whence: item.span,
                     vis: item.vis.clone(),
@@ -542,7 +542,7 @@ impl<'a, 'tcx, 'rcx, 'cstore> RustdocVisitor<'a, 'tcx, 'rcx, 'cstore> {
                 let t = Trait {
                     is_auto,
                     unsafety,
-                    name,
+                    name: ident.name,
                     items,
                     generics: gen.clone(),
                     bounds: b.iter().cloned().collect(),

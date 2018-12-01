@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Serialization for client<->server communication.
+//! Serialization for client <-> server communication.
 
 use std::any::Any;
 use std::char;
