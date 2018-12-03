@@ -110,14 +110,14 @@ use rustc::infer::opaque_types::OpaqueTypeDecl;
 use rustc::infer::type_variable::{TypeVariableOrigin};
 use rustc::middle::region;
 use rustc::mir::interpret::{ConstValue, GlobalId};
-use rustc::ty::subst::{CanonicalUserSubsts, UnpackedKind, Subst, Substs,
-                       UserSelfTy, UserSubsts};
 use rustc::traits::{self, ObligationCause, ObligationCauseCode, TraitEngine};
 use rustc::ty::{self, AdtKind, Ty, TyCtxt, GenericParamDefKind, Visibility, ToPredicate,
                 RegionKind};
 use rustc::ty::adjustment::{Adjust, Adjustment, AllowTwoPhase, AutoBorrow, AutoBorrowMutability};
 use rustc::ty::fold::TypeFoldable;
 use rustc::ty::query::Providers;
+use rustc::ty::subst::{CanonicalUserSubsts, UnpackedKind, Subst, Substs,
+                       UserSelfTy, UserSubsts};
 use rustc::ty::util::{Representability, IntTypeExt, Discr};
 use rustc::ty::layout::VariantIdx;
 use syntax_pos::{self, BytePos, Span, MultiSpan};
@@ -4458,7 +4458,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
                     Def::Err
                 };
                 let (ty, def) = AstConv::associated_path_def_to_ty(self, node_id, path_span,
-                                                                   ty, def, segment);
+                                                                   ty, qself, def, segment);
 
                 // Write back the new resolution.
                 let hir_id = self.tcx.hir().node_to_hir_id(node_id);
@@ -4477,14 +4477,14 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
                                        span: Span)
                                        -> (Def, Option<Ty<'tcx>>, &'b [hir::PathSegment])
     {
-        let (ty, item_segment) = match *qpath {
+        let (ty, ty_hir, item_segment) = match *qpath {
             hir::QPath::Resolved(ref opt_qself, ref path) => {
                 return (path.def,
                         opt_qself.as_ref().map(|qself| self.to_ty(qself)),
                         &path.segments[..]);
             }
             hir::QPath::TypeRelative(ref qself, ref segment) => {
-                (self.to_ty(qself), segment)
+                (self.to_ty(qself), qself, segment)
             }
         };
         let hir_id = self.tcx.hir().node_to_hir_id(node_id);
@@ -4494,7 +4494,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
             return (*cached_def, Some(ty), slice::from_ref(&**item_segment))
         }
         let item_name = item_segment.ident;
-        let def = match self.resolve_ufcs(span, item_name, ty, node_id) {
+        let def = match self.resolve_ufcs(span, item_name, ty, ty_hir, node_id) {
             Ok(def) => def,
             Err(error) => {
                 let def = match error {
@@ -4961,6 +4961,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
 
     fn def_ids_for_path_segments(&self,
                                  segments: &[hir::PathSegment],
+                                 self_ty: Option<Ty<'tcx>>,
                                  def: Def)
                                  -> Vec<PathSeg> {
         // We need to extract the type parameters supplied by the user in
@@ -4972,15 +4973,20 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         //
         // There are basically four cases to consider:
         //
-        // 1. Reference to a constructor of enum variant or struct:
+        // 1. Reference to a constructor of a struct:
         //
         //        struct Foo<T>(...)
+        //
+        //    In this case, the parameters are declared in the type space.
+        //
+        // 2. Reference to a constructor of an enum variant:
+        //
         //        enum E<T> { Foo(...) }
         //
-        //    In these cases, the parameters are declared in the type
-        //    space.
+        //    In this case, the parameters are defined in the type space,
+        //    but may be specified either on the type or the variant.
         //
-        // 2. Reference to a fn item or a free constant:
+        // 3. Reference to a fn item or a free constant:
         //
         //        fn foo<T>() { }
         //
@@ -4989,7 +4995,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         //    type parameters. However, in this case, those parameters are
         //    declared on a value, and hence are in the `FnSpace`.
         //
-        // 3. Reference to a method or an associated constant:
+        // 4. Reference to a method or an associated constant:
         //
         //        impl<A> SomeStruct<A> {
         //            fn foo<B>(...)
@@ -5001,7 +5007,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         //    `SomeStruct::<A>`, contains parameters in TypeSpace, and the
         //    final segment, `foo::<B>` contains parameters in fn space.
         //
-        // 4. Reference to a local variable
+        // 5. Reference to a local variable
         //
         //    Local variables can't have any type parameters.
         //
@@ -5013,9 +5019,8 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         let mut path_segs = vec![];
 
         match def {
-            // Case 1. Reference to a struct/variant constructor.
+            // Case 1. Reference to a struct constructor.
             Def::StructCtor(def_id, ..) |
-            Def::VariantCtor(def_id, ..) |
             Def::SelfCtor(.., def_id) => {
                 // Everything but the final segment should have no
                 // parameters at all.
@@ -5026,14 +5031,49 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
                 path_segs.push(PathSeg(generics_def_id, last));
             }
 
-            // Case 2. Reference to a top-level value.
+            // Case 2. Reference to a variant constructor.
+            Def::VariantCtor(def_id, ..) => {
+                if tcx.features().type_alias_enum_variants {
+                    let adt_def = self_ty.and_then(|t| t.ty_adt_def());
+                    let (generics_def_id, index) = if let Some(adt_def) = adt_def {
+                        debug_assert!(adt_def.is_enum());
+                        (adt_def.did, last)
+                    } else if last >= 1 && segments[last - 1].args.is_some() {
+                        // Everything but the penultimate segment should have no
+                        // parameters at all.
+                        let enum_def_id = self.tcx.parent_def_id(def_id).unwrap();
+                        (enum_def_id, last - 1)
+                    } else {
+                        // FIXME: lint here suggesting `Enum::<...>::Variant` form
+                        // instead of `Enum::Variant::<...>` form.
+
+                        // Everything but the final segment should have no
+                        // parameters at all.
+                        let generics = self.tcx.generics_of(def_id);
+                        // Variant and struct constructors use the
+                        // generics of their parent type definition.
+                        (generics.parent.unwrap_or(def_id), last)
+                    };
+                    path_segs.push(PathSeg(generics_def_id, index));
+                } else {
+                    // Everything but the final segment should have no
+                    // parameters at all.
+                    let generics = self.tcx.generics_of(def_id);
+                    // Variant and struct constructors use the
+                    // generics of their parent type definition.
+                    let generics_def_id = generics.parent.unwrap_or(def_id);
+                    path_segs.push(PathSeg(generics_def_id, last));
+                }
+            }
+
+            // Case 3. Reference to a top-level value.
             Def::Fn(def_id) |
             Def::Const(def_id) |
             Def::Static(def_id, _) => {
                 path_segs.push(PathSeg(def_id, last));
             }
 
-            // Case 3. Reference to a method or associated const.
+            // Case 4. Reference to a method or associated const.
             Def::Method(def_id) |
             Def::AssociatedConst(def_id) => {
                 if segments.len() >= 2 {
@@ -5043,7 +5083,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
                 path_segs.push(PathSeg(def_id, last));
             }
 
-            // Case 4. Local variable, no generics.
+            // Case 5. Local variable, no generics.
             Def::Local(..) | Def::Upvar(..) => {}
 
             _ => bug!("unexpected definition: {:?}", def),
@@ -5071,7 +5111,7 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
             node_id,
         );
 
-        let path_segs = self.def_ids_for_path_segments(segments, def);
+        let path_segs = self.def_ids_for_path_segments(segments, self_ty, def);
 
         let mut user_self_ty = None;
         match def {
@@ -5106,10 +5146,18 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         // provided (if any) into their appropriate spaces. We'll also report
         // errors if type parameters are provided in an inappropriate place.
 
-        let generic_segs = path_segs.iter().map(|PathSeg(_, index)| index)
-            .collect::<FxHashSet<_>>();
+        let is_alias_variant_ctor = if tcx.features().type_alias_enum_variants {
+            match def {
+                Def::VariantCtor(_, _) if self_ty.is_some() => true,
+                _ => false,
+            };
+        } else {
+            false
+        };
+
+        let generic_segs: FxHashSet<_> = path_segs.iter().map(|PathSeg(_, index)| index).collect();
         AstConv::prohibit_generics(self, segments.iter().enumerate().filter_map(|(index, seg)| {
-            if !generic_segs.contains(&index) {
+            if !generic_segs.contains(&index) || is_alias_variant_ctor {
                 Some(seg)
             } else {
                 None
@@ -5160,26 +5208,45 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         }).unwrap_or(false);
 
         let mut new_def = def;
-        let (def_id, ty) = if let Def::SelfCtor(impl_def_id) = def {
-            let ty = self.impl_self_ty(span, impl_def_id).ty;
+        let (def_id, ty) = match def {
+            Def::SelfCtor(impl_def_id) => {
+                let ty = self.impl_self_ty(span, impl_def_id).ty;
 
-            match ty.ty_adt_def() {
-                Some(adt_def) if adt_def.is_struct() => {
-                    let variant = adt_def.non_enum_variant();
-                    new_def = Def::StructCtor(variant.did, variant.ctor_kind);
-                    (variant.did, self.tcx.type_of(variant.did))
-                }
-                _ => {
-                    (impl_def_id, self.tcx.types.err)
+                match ty.ty_adt_def() {
+                    Some(adt_def) if adt_def.is_struct() => {
+                        let variant = adt_def.non_enum_variant();
+                        new_def = Def::StructCtor(variant.did, variant.ctor_kind);
+                        (variant.did, self.tcx.type_of(variant.did))
+                    }
+                    _ => {
+                        (impl_def_id, self.tcx.types.err)
+                    }
                 }
             }
-        } else {
-            let def_id = def.def_id();
+            Def::VariantCtor(_, _) if self_ty.is_some() => {
+                let def_id = def.def_id();
 
-            // The things we are substituting into the type should not contain
-            // escaping late-bound regions, and nor should the base type scheme.
-            let ty = self.tcx.type_of(def_id);
-            (def_id, ty)
+                let ty = self.tcx.type_of(def_id);
+                if tcx.features().type_alias_enum_variants {
+                    if let Some(self_ty) = self_ty {
+                        match ty.ty_adt_def() {
+                            Some(adt_def) if adt_def.is_enum() => {
+                                return (self_ty, def);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                (def_id, ty)
+            }
+            _ => {
+                let def_id = def.def_id();
+
+                // The things we are substituting into the type should not contain
+                // escaping late-bound regions, and nor should the base type scheme.
+                let ty = self.tcx.type_of(def_id);
+                (def_id, ty)
+            }
         };
 
         let substs = AstConv::create_substs_for_generic_args(

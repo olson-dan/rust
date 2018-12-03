@@ -493,6 +493,9 @@ declare_features! (
 
     // Allows calling `const unsafe fn` inside `unsafe` blocks in `const fn` functions.
     (active, min_const_unsafe_fn, "1.31.0", Some(55607), None),
+
+    // Allows paths to enum variants on type aliases.
+    (active, type_alias_enum_variants, "1.31.0", Some(49683), None),
 );
 
 declare_features! (
