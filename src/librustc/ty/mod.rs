@@ -1654,8 +1654,7 @@ impl<'tcx> ParamEnv<'tcx> {
     /// Construct a trait environment with the given set of predicates.
     #[inline]
     pub fn new(caller_bounds: &'tcx List<ty::Predicate<'tcx>>,
-               reveal: Reveal)
-               -> Self {
+               reveal: Reveal) -> Self {
         ty::ParamEnv { caller_bounds, reveal }
     }
 
@@ -1754,17 +1753,19 @@ bitflags! {
     pub struct AdtFlags: u32 {
         const NO_ADT_FLAGS        = 0;
         const IS_ENUM             = 1 << 0;
-        const IS_PHANTOM_DATA     = 1 << 1;
-        const IS_FUNDAMENTAL      = 1 << 2;
-        const IS_UNION            = 1 << 3;
-        const IS_BOX              = 1 << 4;
+        const IS_UNION            = 1 << 1;
+        const IS_STRUCT           = 1 << 2;
+        const IS_TUPLE_STRUCT     = 1 << 3;
+        const IS_PHANTOM_DATA     = 1 << 4;
+        const IS_FUNDAMENTAL      = 1 << 5;
+        const IS_BOX              = 1 << 6;
         /// Indicates whether the type is an `Arc`.
-        const IS_ARC              = 1 << 5;
+        const IS_ARC              = 1 << 7;
         /// Indicates whether the type is an `Rc`.
-        const IS_RC               = 1 << 6;
+        const IS_RC               = 1 << 8;
         /// Indicates whether the variant list of this ADT is `#[non_exhaustive]`.
         /// (i.e., this flag is never set unless this ADT is an enum).
-        const IS_VARIANT_LIST_NON_EXHAUSTIVE   = 1 << 7;
+        const IS_VARIANT_LIST_NON_EXHAUSTIVE = 1 << 9;
     }
 }
 
@@ -1781,7 +1782,7 @@ pub struct VariantDef {
     /// The variant's `DefId`. If this is a tuple-like struct,
     /// this is the `DefId` of the struct's ctor.
     pub did: DefId,
-    pub name: Name, // struct's name if this is a struct
+    pub ident: Ident, // struct's name if this is a struct
     pub discr: VariantDiscr,
     pub fields: Vec<FieldDef>,
     pub ctor_kind: CtorKind,
@@ -1791,21 +1792,22 @@ pub struct VariantDef {
 impl<'a, 'gcx, 'tcx> VariantDef {
     /// Create a new `VariantDef`.
     ///
-    /// - `did` is the DefId used for the variant - for tuple-structs, it is the constructor DefId,
-    /// and for everything else, it is the variant DefId.
+    /// - `did` is the `DefId` used for the variant.
+    /// This is the constructor `DefId` for tuple stucts, and the variant `DefId` for everything
+    /// else.
     /// - `attribute_def_id` is the DefId that has the variant's attributes.
-    /// this is the struct DefId for structs, and the variant DefId for variants.
+    /// This is the struct `DefId` for structs, and the variant `DefId` for variants.
     ///
-    /// Note that we *could* use the constructor DefId, because the constructor attributes
+    /// Note that we *could* use the constructor `DefId`, because the constructor attributes
     /// redirect to the base attributes, but compiling a small crate requires
-    /// loading the AdtDefs for all the structs in the universe (e.g., coherence for any
+    /// loading the `AdtDef`s for all the structs in the universe (e.g., coherence for any
     /// built-in trait), and we do not want to load attributes twice.
     ///
     /// If someone speeds up attribute loading to not be a performance concern, they can
-    /// remove this hack and use the constructor DefId everywhere.
+    /// remove this hack and use the constructor `DefId` everywhere.
     pub fn new(tcx: TyCtxt<'a, 'gcx, 'tcx>,
                did: DefId,
-               name: Name,
+               ident: Ident,
                discr: VariantDiscr,
                fields: Vec<FieldDef>,
                adt_kind: AdtKind,
@@ -1813,7 +1815,7 @@ impl<'a, 'gcx, 'tcx> VariantDef {
                attribute_def_id: DefId)
                -> Self
     {
-        debug!("VariantDef::new({:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?})", did, name, discr,
+        debug!("VariantDef::new({:?}, {:?}, {:?}, {:?}, {:?}, {:?}, {:?})", did, ident, discr,
                fields, adt_kind, ctor_kind, attribute_def_id);
         let mut flags = VariantFlags::NO_VARIANT_FLAGS;
         if adt_kind == AdtKind::Struct && tcx.has_attr(attribute_def_id, "non_exhaustive") {
@@ -1822,7 +1824,7 @@ impl<'a, 'gcx, 'tcx> VariantDef {
         }
         VariantDef {
             did,
-            name,
+            ident,
             discr,
             fields,
             ctor_kind,
@@ -1838,7 +1840,7 @@ impl<'a, 'gcx, 'tcx> VariantDef {
 
 impl_stable_hash_for!(struct VariantDef {
     did,
-    name,
+    ident -> (ident.name),
     discr,
     fields,
     ctor_kind,
@@ -1979,8 +1981,6 @@ impl_stable_hash_for!(struct ReprFlags {
     bits
 });
 
-
-
 /// Represents the repr options provided by the user,
 #[derive(Copy, Clone, Debug, Eq, PartialEq, RustcEncodable, RustcDecodable, Default)]
 pub struct ReprOptions {
@@ -2079,31 +2079,43 @@ impl<'a, 'gcx, 'tcx> AdtDef {
            repr: ReprOptions) -> Self {
         debug!("AdtDef::new({:?}, {:?}, {:?}, {:?})", did, kind, variants, repr);
         let mut flags = AdtFlags::NO_ADT_FLAGS;
-        let attrs = tcx.get_attrs(did);
-        if attr::contains_name(&attrs, "fundamental") {
-            flags = flags | AdtFlags::IS_FUNDAMENTAL;
-        }
-        if Some(did) == tcx.lang_items().phantom_data() {
-            flags = flags | AdtFlags::IS_PHANTOM_DATA;
-        }
-        if Some(did) == tcx.lang_items().owned_box() {
-            flags = flags | AdtFlags::IS_BOX;
-        }
-        if Some(did) == tcx.lang_items().arc() {
-            flags = flags | AdtFlags::IS_ARC;
-        }
-        if Some(did) == tcx.lang_items().rc() {
-            flags = flags | AdtFlags::IS_RC;
-        }
+
         if kind == AdtKind::Enum && tcx.has_attr(did, "non_exhaustive") {
             debug!("found non-exhaustive variant list for {:?}", did);
             flags = flags | AdtFlags::IS_VARIANT_LIST_NON_EXHAUSTIVE;
         }
-        match kind {
-            AdtKind::Enum => flags = flags | AdtFlags::IS_ENUM,
-            AdtKind::Union => flags = flags | AdtFlags::IS_UNION,
-            AdtKind::Struct => {}
+        flags |= match kind {
+            AdtKind::Enum => AdtFlags::IS_ENUM,
+            AdtKind::Union => AdtFlags::IS_UNION,
+            AdtKind::Struct => AdtFlags::IS_STRUCT,
+        };
+
+        if let AdtKind::Struct = kind {
+            let variant_def = &variants[VariantIdx::new(0)];
+            let def_key = tcx.def_key(variant_def.did);
+            match def_key.disambiguated_data.data {
+                DefPathData::StructCtor => flags |= AdtFlags::IS_TUPLE_STRUCT,
+                _ => (),
+            }
         }
+
+        let attrs = tcx.get_attrs(did);
+        if attr::contains_name(&attrs, "fundamental") {
+            flags |= AdtFlags::IS_FUNDAMENTAL;
+        }
+        if Some(did) == tcx.lang_items().phantom_data() {
+            flags |= AdtFlags::IS_PHANTOM_DATA;
+        }
+        if Some(did) == tcx.lang_items().owned_box() {
+            flags |= AdtFlags::IS_BOX;
+        }
+        if Some(did) == tcx.lang_items().arc() {
+            flags |= AdtFlags::IS_ARC;
+        }
+        if Some(did) == tcx.lang_items().rc() {
+            flags |= AdtFlags::IS_RC;
+        }
+
         AdtDef {
             did,
             variants,
@@ -2114,25 +2126,31 @@ impl<'a, 'gcx, 'tcx> AdtDef {
 
     #[inline]
     pub fn is_struct(&self) -> bool {
-        !self.is_union() && !self.is_enum()
+        self.flags.contains(AdtFlags::IS_STRUCT)
+    }
+
+    /// If this function returns `true`, it implies that `is_struct` must return `true`.
+    #[inline]
+    pub fn is_tuple_struct(&self) -> bool {
+        self.flags.contains(AdtFlags::IS_TUPLE_STRUCT)
     }
 
     #[inline]
     pub fn is_union(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_UNION)
+        self.flags.contains(AdtFlags::IS_UNION)
     }
 
     #[inline]
     pub fn is_enum(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_ENUM)
+        self.flags.contains(AdtFlags::IS_ENUM)
     }
 
     #[inline]
     pub fn is_variant_list_non_exhaustive(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_VARIANT_LIST_NON_EXHAUSTIVE)
+        self.flags.contains(AdtFlags::IS_VARIANT_LIST_NON_EXHAUSTIVE)
     }
 
-    /// Returns the kind of the ADT - Struct or Enum.
+    /// Returns the kind of the ADT.
     #[inline]
     pub fn adt_kind(&self) -> AdtKind {
         if self.is_enum() {
@@ -2161,33 +2179,33 @@ impl<'a, 'gcx, 'tcx> AdtDef {
         }
     }
 
-    /// Returns whether this type is #[fundamental] for the purposes
+    /// Returns whether this type is `#[fundamental]` for the purposes
     /// of coherence checking.
     #[inline]
     pub fn is_fundamental(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_FUNDAMENTAL)
+        self.flags.contains(AdtFlags::IS_FUNDAMENTAL)
     }
 
     /// Returns `true` if this is PhantomData<T>.
     #[inline]
     pub fn is_phantom_data(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_PHANTOM_DATA)
+        self.flags.contains(AdtFlags::IS_PHANTOM_DATA)
     }
 
     /// Returns `true` if this is `Arc<T>`.
     pub fn is_arc(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_ARC)
+        self.flags.contains(AdtFlags::IS_ARC)
     }
 
     /// Returns `true` if this is `Rc<T>`.
     pub fn is_rc(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_RC)
+        self.flags.contains(AdtFlags::IS_RC)
     }
 
     /// Returns `true` if this is Box<T>.
     #[inline]
     pub fn is_box(&self) -> bool {
-        self.flags.intersects(AdtFlags::IS_BOX)
+        self.flags.contains(AdtFlags::IS_BOX)
     }
 
     /// Returns whether this type has a destructor.
@@ -2359,12 +2377,12 @@ impl<'a, 'gcx, 'tcx> AdtDef {
     }
 
     /// Returns a list of types such that `Self: Sized` if and only
-    /// if that type is Sized, or `TyErr` if this type is recursive.
+    /// if that type is `Sized`, or `TyErr` if this type is recursive.
     ///
-    /// Oddly enough, checking that the sized-constraint is Sized is
+    /// Oddly enough, checking that the sized-constraint is `Sized` is
     /// actually more expressive than checking all members:
-    /// the Sized trait is inductive, so an associated type that references
-    /// Self would prevent its containing ADT from being Sized.
+    /// the `Sized` trait is inductive, so an associated type that references
+    /// `Self` would prevent its containing ADT from being `Sized`.
     ///
     /// Due to normalization being eager, this applies even if
     /// the associated type is behind a pointer, e.g., issue #31299.
@@ -2402,7 +2420,7 @@ impl<'a, 'gcx, 'tcx> AdtDef {
             Foreign(..) |
             Error |
             GeneratorWitness(..) => {
-                // these are never sized - return the target type
+                // These are never sized; return the target type.
                 vec![ty]
             }
 
@@ -2425,7 +2443,7 @@ impl<'a, 'gcx, 'tcx> AdtDef {
             }
 
             Projection(..) | Opaque(..) => {
-                // must calculate explicitly.
+                // Must calculate explicitly.
                 // FIXME: consider special-casing always-Sized projections
                 vec![ty]
             }
@@ -2433,7 +2451,7 @@ impl<'a, 'gcx, 'tcx> AdtDef {
             UnnormalizedProjection(..) => bug!("only used with chalk-engine"),
 
             Param(..) => {
-                // perf hack: if there is a `T: Sized` bound, then
+                // Performance hack: if there is a `T: Sized` bound, then
                 // we know that `T` is Sized and do not need to check
                 // it on the impl.
 
@@ -2817,12 +2835,12 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
     pub fn adt_def_id_of_variant(self, variant_def: &'tcx VariantDef) -> DefId {
         let def_key = self.def_key(variant_def.did);
         match def_key.disambiguated_data.data {
-            // for enum variants and tuple structs, the def-id of the ADT itself
-            // is the *parent* of the variant
+            // For enum variants and tuple structs, the def-id of the ADT itself
+            // is the *parent* of the variant.
             DefPathData::EnumVariant(..) | DefPathData::StructCtor =>
                 DefId { krate: variant_def.did.krate, index: def_key.parent.unwrap() },
 
-            // otherwise, for structs and unions, they share a def-id
+            // Otherwise, for structs and unions, they share a def-id.
             _ => variant_def.did,
         }
     }
@@ -2832,7 +2850,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
             self.original_crate_name(id.krate).as_interned_str()
         } else {
             let def_key = self.def_key(id);
-            // The name of a StructCtor is that of its struct parent.
+            // The name of a `StructCtor` is that of its struct parent.
             if let hir_map::DefPathData::StructCtor = def_key.disambiguated_data.data {
                 self.item_name(DefId {
                     krate: id.krate,
@@ -2846,7 +2864,7 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
         }
     }
 
-    /// Return the possibly-auto-generated MIR of a (DefId, Subst) pair.
+    /// Return the possibly-auto-generated MIR of a `(DefId, Subst)` pair.
     pub fn instance_mir(self, instance: ty::InstanceDef<'gcx>)
                         -> &'gcx Mir<'gcx>
     {
@@ -2866,8 +2884,8 @@ impl<'a, 'gcx, 'tcx> TyCtxt<'a, 'gcx, 'tcx> {
         }
     }
 
-    /// Given the DefId of an item, returns its MIR, borrowed immutably.
-    /// Returns None if there is no MIR for the DefId
+    /// Given the `DefId` of an item, returns its MIR, borrowed immutably.
+    /// Returns `None` if there is no MIR for the `DefId`.
     pub fn maybe_optimized_mir(self, did: DefId) -> Option<&'gcx Mir<'gcx>> {
         if self.is_mir_available(did) {
             Some(self.optimized_mir(did))
@@ -3021,7 +3039,7 @@ fn associated_item<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Asso
               parent_item.node)
 }
 
-/// Calculates the Sized-constraint.
+/// Calculates the `Sized` constraint.
 ///
 /// In fact, there are only a few options for the types in the constraint:
 ///     - an obviously-unsized type
@@ -3074,9 +3092,9 @@ fn def_span<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Span {
     tcx.hir().span_if_local(def_id).unwrap()
 }
 
-/// If the given def ID describes an item belonging to a trait,
-/// return the ID of the trait that the trait item belongs to.
-/// Otherwise, return `None`.
+/// If the given def-id describes an item belonging to a trait,
+/// returns the def-id of the trait that the trait item belongs to;
+/// otherwise, returns `None`.
 fn trait_of_item<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Option<DefId> {
     tcx.opt_associated_item(def_id)
         .and_then(|associated_item| {
@@ -3087,7 +3105,7 @@ fn trait_of_item<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, def_id: DefId) -> Option
         })
 }
 
-/// Yields the parent function's `DefId` if `def_id` is an `impl Trait` definition.
+/// Yields the parent function's def-id if `def_id` is an `impl Trait` definition.
 pub fn is_impl_trait_defn(tcx: TyCtxt<'_, '_, '_>, def_id: DefId) -> Option<DefId> {
     if let Some(node_id) = tcx.hir().as_local_node_id(def_id) {
         if let Node::Item(item) = tcx.hir().get(node_id) {

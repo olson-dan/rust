@@ -10,7 +10,7 @@
 
 /*!
 
-# typeck.rs
+# typeck
 
 The type checker is responsible for:
 
@@ -32,7 +32,7 @@ several major phases:
 4. Finally, the check phase then checks function bodies and so forth.
    Within the check phase, we check each function body one at a time
    (bodies of function expressions are checked as part of the
-   containing function).  Inference is used to supply types wherever
+   containing function). Inference is used to supply types wherever
    they are unknown. The actual checking of a function itself has
    several phases (check, regionck, writeback), as discussed in the
    documentation for the `check` module.
@@ -53,10 +53,10 @@ independently:
 - outlives: outlives inference
 
 - check: walks over function bodies and type checks them, inferring types for
-  local variables, type parameters, etc as necessary.
+  local variables, type parameters, etc., as necessary.
 
 - infer: finds the types to use for each type variable such that
-  all subtyping and assignment constraints are met.  In essence, the check
+  all subtyping and assignment constraints are met. In essence, the check
   module specifies the constraints, and the infer module solves them.
 
 ## Note
@@ -120,6 +120,7 @@ use rustc::infer::InferOk;
 use rustc::lint;
 use rustc::middle;
 use rustc::session;
+use rustc::session::config::nightly_options;
 use rustc::traits::{ObligationCause, ObligationCauseCode, TraitEngine, TraitEngineExt};
 use rustc::ty::subst::Substs;
 use rustc::ty::{self, Ty, TyCtxt};
@@ -136,6 +137,22 @@ use std::iter;
 pub struct TypeAndSubsts<'tcx> {
     substs: &'tcx Substs<'tcx>,
     ty: Ty<'tcx>,
+}
+
+fn check_type_alias_enum_variants_enabled<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
+                                                          span: Span) {
+    if !tcx.features().type_alias_enum_variants {
+        let mut err = tcx.sess.struct_span_err(
+            span,
+            "enum variants on type aliases are experimental"
+        );
+        if nightly_options::is_nightly_build() {
+            help!(&mut err,
+                "add `#![feature(type_alias_enum_variants)]` to the \
+                crate attributes to enable");
+        }
+        err.emit();
+    }
 }
 
 fn require_c_abi_if_variadic(tcx: TyCtxt,
@@ -366,11 +383,11 @@ pub fn check_crate<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>)
 }
 
 /// A quasi-deprecated helper used in rustdoc and save-analysis to get
-/// the type from a HIR node.
+/// the type from an HIR node.
 pub fn hir_ty_to_ty<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, hir_ty: &hir::Ty) -> Ty<'tcx> {
     // In case there are any projections etc, find the "environment"
     // def-id that will be used to determine the traits/predicates in
-    // scope.  This is derived from the enclosing item-like thing.
+    // scope. This is derived from the enclosing item-like thing.
     let env_node_id = tcx.hir().get_parent(hir_ty.id);
     let env_def_id = tcx.hir().local_def_id(env_node_id);
     let item_cx = self::collect::ItemCtxt::new(tcx, env_def_id);
@@ -382,7 +399,7 @@ pub fn hir_trait_to_predicates<'a, 'tcx>(tcx: TyCtxt<'a, 'tcx, 'tcx>, hir_trait:
         -> (ty::PolyTraitRef<'tcx>, Vec<(ty::PolyProjectionPredicate<'tcx>, Span)>) {
     // In case there are any projections etc, find the "environment"
     // def-id that will be used to determine the traits/predicates in
-    // scope.  This is derived from the enclosing item-like thing.
+    // scope. This is derived from the enclosing item-like thing.
     let env_node_id = tcx.hir().get_parent(hir_trait.ref_id);
     let env_def_id = tcx.hir().local_def_id(env_node_id);
     let item_cx = self::collect::ItemCtxt::new(tcx, env_def_id);

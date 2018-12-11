@@ -1129,8 +1129,8 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
         dep_node: DepNodeIndex,
         result: EvaluationResult,
     ) {
-        // Avoid caching results that depend on more than just the trait-ref
-        // - the stack can create recursion.
+        // Avoid caching results that depend on more than just the trait-ref;
+        // the stack can create recursion.
         if result.is_stack_dependent() {
             return;
         }
@@ -1142,9 +1142,9 @@ impl<'cx, 'gcx, 'tcx> SelectionContext<'cx, 'gcx, 'tcx> {
                     trait_ref, result,
                 );
                 // This may overwrite the cache with the same value
-                // FIXME: Due to #50507 this overwrites the different values
-                // This should be changed to use HashMapExt::insert_same
-                // when that is fixed
+                // FIXME: due to #50507 this overwrites the different values
+                // This should be changed to use `HashMapExt::insert_same`
+                // when that is fixed.
                 self.tcx()
                     .evaluation_cache
                     .hashmap

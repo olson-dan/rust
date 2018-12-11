@@ -132,14 +132,14 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NonCamelCaseTypes {
             hir::ItemKind::Ty(..) |
             hir::ItemKind::Enum(..) |
             hir::ItemKind::Struct(..) |
-            hir::ItemKind::Union(..) => self.check_case(cx, "type", it.name, it.span),
-            hir::ItemKind::Trait(..) => self.check_case(cx, "trait", it.name, it.span),
+            hir::ItemKind::Union(..) => self.check_case(cx, "type", it.ident.name, it.span),
+            hir::ItemKind::Trait(..) => self.check_case(cx, "trait", it.ident.name, it.span),
             _ => (),
         }
     }
 
     fn check_variant(&mut self, cx: &LateContext, v: &hir::Variant, _: &hir::Generics) {
-        self.check_case(cx, "variant", v.node.name, v.span);
+        self.check_case(cx, "variant", v.node.ident.name, v.span);
     }
 
     fn check_generic_param(&mut self, cx: &LateContext, param: &hir::GenericParam) {
@@ -293,7 +293,7 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NonSnakeCase {
 
     fn check_item(&mut self, cx: &LateContext, it: &hir::Item) {
         if let hir::ItemKind::Mod(_) = it.node {
-            self.check_snake_case(cx, "module", &it.name.as_str(), Some(it.span));
+            self.check_snake_case(cx, "module", &it.ident.as_str(), Some(it.span));
         }
     }
 
@@ -369,10 +369,12 @@ impl<'a, 'tcx> LateLintPass<'a, 'tcx> for NonUpperCaseGlobals {
                 if attr::find_by_name(&it.attrs, "no_mangle").is_some() {
                     return;
                 }
-                NonUpperCaseGlobals::check_upper_case(cx, "static variable", it.name, it.span);
+                NonUpperCaseGlobals::check_upper_case(cx, "static variable", it.ident.name,
+                                                      it.span);
             }
             hir::ItemKind::Const(..) => {
-                NonUpperCaseGlobals::check_upper_case(cx, "constant", it.name, it.span);
+                NonUpperCaseGlobals::check_upper_case(cx, "constant", it.ident.name,
+                                                      it.span);
             }
             _ => {}
         }

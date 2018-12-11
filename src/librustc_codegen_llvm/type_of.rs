@@ -58,7 +58,7 @@ fn uncached_llvm_type<'a, 'tcx>(cx: &CodegenCx<'a, 'tcx>,
         ty::Closure(..) |
         ty::Generator(..) |
         ty::Adt(..) |
-        // FIXME(eddyb) producing readable type names for trait objects can result
+        // FIXME(eddyb): producing readable type names for trait objects can result
         // in problematically distinct types due to HRTB and subtyping (see #47638).
         // ty::Dynamic(..) |
         ty::Foreign(..) |
@@ -70,7 +70,7 @@ fn uncached_llvm_type<'a, 'tcx>(cx: &CodegenCx<'a, 'tcx>,
                  = (&layout.ty.sty, &layout.variants)
             {
                 if def.is_enum() && !def.variants.is_empty() {
-                    write!(&mut name, "::{}", def.variants[index].name).unwrap();
+                    write!(&mut name, "::{}", def.variants[index].ident).unwrap();
                 }
             }
             Some(name)

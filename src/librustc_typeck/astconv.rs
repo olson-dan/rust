@@ -41,6 +41,8 @@ use std::collections::BTreeSet;
 use std::iter;
 use std::slice;
 
+use super::{check_type_alias_enum_variants_enabled};
+
 pub trait AstConv<'gcx, 'tcx> {
     fn tcx<'a>(&'a self) -> TyCtxt<'a, 'gcx, 'tcx>;
 
@@ -1272,6 +1274,22 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx> + 'o {
 
         self.prohibit_generics(slice::from_ref(item_segment));
 
+        // Check if we have an enum variant here.
+        if let ty::Adt(adt_def, _) = ty.sty {
+            if adt_def.is_enum() {
+                let variant_def = adt_def.variants.iter().find(|vd| {
+                    tcx.hygienic_eq(assoc_name, vd.ident, adt_def.did)
+                });
+                if let Some(variant_def) = variant_def {
+                    check_type_alias_enum_variants_enabled(tcx, span);
+
+                    let def = Def::Variant(variant_def.did);
+                    tcx.check_stability(def.def_id(), Some(ref_id), span);
+                    return (ty, def);
+                }
+            }
+        }
+
         // Find the type of the associated item, and the trait where the associated
         // item is declared.
         let bound = match (&ty.sty, ty_path_def) {
@@ -1308,8 +1326,8 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx> + 'o {
                     span,
                     &format!("no variant `{}` on enum `{}`", &assoc_name.as_str(), ty_str),
                 );
-                // Check if it was a typo
-                let input = adt_def.variants.iter().map(|variant| &variant.name);
+                // Check if it was a typo.
+                let input = adt_def.variants.iter().map(|variant| &variant.ident.name);
                 if let Some(suggested_name) = find_best_match_for_name(
                     input,
                     &assoc_name.as_str(),
@@ -1328,7 +1346,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx> + 'o {
                 return (tcx.types.err, Def::Err);
             }
             _ => {
-                // Don't print TyErr to the user.
+                // Don't print `TyErr` to the user.
                 if !ty.references_error() {
                     self.report_ambiguous_associated_type(span,
                                                           &ty.to_string(),
@@ -1344,8 +1362,7 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx> + 'o {
         let item = tcx.associated_items(trait_did).find(|i| {
             Namespace::from(i.kind) == Namespace::Type &&
                 i.ident.modern() == assoc_ident
-        })
-        .expect("missing associated type");
+        }).expect("missing associated type");
 
         let ty = self.projected_ty_from_poly_trait_ref(span, item.def_id, bound);
         let ty = self.normalize_ty(span, ty);
@@ -1491,10 +1508,8 @@ impl<'o, 'gcx: 'tcx, 'tcx> dyn AstConv<'gcx, 'tcx> + 'o {
             }
             Def::SelfTy(_, Some(def_id)) => {
                 // `Self` in impl (we know the concrete type)
-
                 assert_eq!(opt_self_ty, None);
                 self.prohibit_generics(&path.segments);
-
                 tcx.at(span).type_of(def_id)
             }
             Def::SelfTy(Some(_), None) => {

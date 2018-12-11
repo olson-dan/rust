@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Code to validate patterns/matches
+//! This module handles the validation of patterns/matches.
 
 mod _match;
 mod check_match;
@@ -83,7 +83,7 @@ impl<'tcx> PatternTypeProjections<'tcx> {
     }
 
     pub(crate) fn ref_binding(&self) -> Self {
-        // FIXME(#47184): ignore for now
+        // FIXME(#47184): ignore for now.
         PatternTypeProjections { contents: vec![] }
     }
 
@@ -187,7 +187,7 @@ pub enum PatternKind<'tcx> {
         user_ty_span: Span,
     },
 
-    /// x, ref x, x @ P, etc
+    /// `x`, `ref x`, `x @ P`, etc.
     Binding {
         mutability: Mutability,
         name: ast::Name,
@@ -197,7 +197,8 @@ pub enum PatternKind<'tcx> {
         subpattern: Option<Pattern<'tcx>>,
     },
 
-    /// Foo(...) or Foo{...} or Foo, where `Foo` is a variant name from an adt with >1 variants
+    /// `Foo(...)` or `Foo{...}` or `Foo`, where `Foo` is a variant name from an ADT with
+    /// multiple variants.
     Variant {
         adt_def: &'tcx AdtDef,
         substs: &'tcx Substs<'tcx>,
@@ -205,12 +206,13 @@ pub enum PatternKind<'tcx> {
         subpatterns: Vec<FieldPattern<'tcx>>,
     },
 
-    /// (...), Foo(...), Foo{...}, or Foo, where `Foo` is a variant name from an adt with 1 variant
+    /// `(...)`, `Foo(...)`, `Foo{...}`, or `Foo`, where `Foo` is a variant name from an ADT with
+    /// a single variant.
     Leaf {
         subpatterns: Vec<FieldPattern<'tcx>>,
     },
 
-    /// box P, &P, &mut P, etc
+    /// `box P`, `&P`, `&mut P`, etc.
     Deref {
         subpattern: Pattern<'tcx>,
     },
@@ -226,7 +228,7 @@ pub enum PatternKind<'tcx> {
         end: RangeEnd,
     },
 
-    /// matches against a slice, checking the length and extracting elements.
+    /// Matches against a slice, checking the length and extracting elements.
     /// irrefutable when there is a slice pattern and both `prefix` and `suffix` are empty.
     /// e.g., `&[ref xs..]`.
     Slice {
@@ -235,7 +237,7 @@ pub enum PatternKind<'tcx> {
         suffix: Vec<Pattern<'tcx>>,
     },
 
-    /// fixed match against an array, irrefutable
+    /// Fixed match against an array; irrefutable.
     Array {
         prefix: Vec<Pattern<'tcx>>,
         slice: Option<Pattern<'tcx>>,
@@ -287,7 +289,7 @@ impl<'tcx> fmt::Display for Pattern<'tcx> {
                 let mut start_or_continue = || if first { first = false; "" } else { ", " };
 
                 if let Some(variant) = variant {
-                    write!(f, "{}", variant.name)?;
+                    write!(f, "{}", variant.ident)?;
 
                     // Only for Adt we can have `S {...}`,
                     // which we handle separately here.
@@ -549,7 +551,8 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
                     ty::Slice(..) |
                     ty::Array(..) =>
                         self.slice_or_array_pattern(pat.span, ty, prefix, slice, suffix),
-                    ty::Error => { // Avoid ICE
+                    ty::Error => {
+                        // Avoid ICE.
                         return Pattern { span: pat.span, ty, kind: Box::new(PatternKind::Wild) };
                     }
                     ref sty =>
@@ -574,7 +577,8 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
 
                         PatternKind::Leaf { subpatterns }
                     }
-                    ty::Error => { // Avoid ICE (#50577)
+                    ty::Error => {
+                        // Avoid ICE (#50577).
                         return Pattern { span: pat.span, ty, kind: Box::new(PatternKind::Wild) };
                     }
                     ref sty => span_bug!(pat.span, "unexpected type for tuple pattern: {:?}", sty),
@@ -585,7 +589,8 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
                 let var_ty = self.tables.node_id_to_type(pat.hir_id);
                 let region = match var_ty.sty {
                     ty::Ref(r, _, _) => Some(r),
-                    ty::Error => { // Avoid ICE
+                    ty::Error => {
+                        // Avoid ICE.
                         return Pattern { span: pat.span, ty, kind: Box::new(PatternKind::Wild) };
                     }
                     _ => None,
@@ -697,7 +702,7 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
         let orig_prefix = prefix;
         let orig_suffix = suffix;
 
-        // dance because of intentional borrow-checker stupidity.
+        // Dance because of intentional borrow-checker stupidity.
         let kind = *orig_slice.kind;
         match kind {
             PatternKind::Slice { prefix, slice, mut suffix } |
@@ -767,7 +772,8 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
                     let substs = match ty.sty {
                         ty::Adt(_, substs) |
                         ty::FnDef(_, substs) => substs,
-                        ty::Error => {  // Avoid ICE (#50585)
+                        ty::Error => {
+                            // Avoid ICE (#50585).
                             return PatternKind::Wild;
                         }
                         _ => bug!("inappropriate type for def: {:?}", ty.sty),
@@ -816,7 +822,7 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
 
     /// Takes a HIR Path. If the path is a constant, evaluates it and feeds
     /// it to `const_to_pat`. Any other path (like enum variants without fields)
-    /// is converted to the corresponding pattern via `lower_variant_or_leaf`
+    /// is converted to the corresponding pattern via `lower_variant_or_leaf`.
     fn lower_path(&mut self,
                   qpath: &hir::QPath,
                   id: hir::HirId,
@@ -876,8 +882,8 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
     }
 
     /// Converts literals, paths and negation of literals to patterns.
-    /// The special case for negation exists to allow things like -128i8
-    /// which would overflow if we tried to evaluate 128i8 and then negate
+    /// The special case for negation exists to allow things like `-128_i8`
+    /// which would overflow if we tried to evaluate `128_i8` and then negate
     /// afterwards.
     fn lower_lit(&mut self, expr: &'tcx hir::Expr) -> PatternKind<'tcx> {
         match expr.node {
@@ -926,7 +932,7 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
 
     /// Converts an evaluated constant to a pattern (if possible).
     /// This means aggregate values (like structs and enums) are converted
-    /// to a pattern that matches the value (as if you'd compare via eq).
+    /// to a pattern that matches the value (as if you'd compared via equality).
     fn const_to_pat(
         &self,
         instance: ty::Instance<'tcx>,
@@ -966,7 +972,7 @@ impl<'a, 'tcx> PatternContext<'a, 'tcx> {
                 }
             },
             ty::Adt(adt_def, _) if adt_def.is_union() => {
-                // Matching on union fields is unsafe, we can't hide it in constants
+                // Matching on union fields is unsafe; we can't hide it in constants.
                 self.tcx.sess.span_err(span, "cannot use unions in constant patterns");
                 PatternKind::Wild
             }
