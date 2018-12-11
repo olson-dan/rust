@@ -234,7 +234,7 @@ pub struct DefPath {
     /// The path leading from the crate root to the item.
     pub data: Vec<DisambiguatedDefPathData>,
 
-    /// The crate root this path is relative to.
+    /// The krate root this path is relative to.
     pub krate: CrateNum,
 }
 

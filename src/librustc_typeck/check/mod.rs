@@ -3222,8 +3222,8 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
                             return_expr_ty);
     }
 
-    // A generic function for checking the 'then' and 'else' clauses in an 'if'
-    // or 'if-else' expression.
+    // A generic function for checking the "then" and "else" clauses in an "if"
+    // or "if-else" expression.
     fn check_then_else(&self,
                        cond_expr: &'gcx hir::Expr,
                        then_expr: &'gcx hir::Expr,
@@ -5218,14 +5218,33 @@ impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
         let (def_id, ty) = match def {
             Def::SelfCtor(impl_def_id) => {
                 let ty = self.impl_self_ty(span, impl_def_id).ty;
+                let adt_def = ty.ty_adt_def();
 
-                match ty.ty_adt_def() {
-                    Some(adt_def) if adt_def.is_struct() => {
+                match adt_def {
+                    Some(adt_def) if adt_def.is_tuple_struct() => {
                         let variant = adt_def.non_enum_variant();
                         new_def = Def::StructCtor(variant.did, variant.ctor_kind);
                         (variant.did, tcx.type_of(variant.did))
                     }
                     _ => {
+                        let mut err = tcx.sess.struct_span_err(span,
+                            "the `Self` constructor can only be used with tuple structs");
+                        if let Some(adt_def) = adt_def {
+                            match adt_def.adt_kind() {
+                                AdtKind::Enum => {
+                                    err.note("did you mean to use one of the enum's variants?");
+                                },
+                                AdtKind::Union => {},
+                                AdtKind::Struct => {
+                                    err.span_label(
+                                        span,
+                                        format!("did you mean `Self {{ /* fields */ }}`?"),
+                                    );
+                                }
+                            }
+                        }
+                        err.emit();
+
                         (impl_def_id, tcx.types.err)
                     }
                 }
