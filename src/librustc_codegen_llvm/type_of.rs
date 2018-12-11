@@ -58,7 +58,7 @@ fn uncached_llvm_type<'a, 'tcx>(cx: &CodegenCx<'a, 'tcx>,
         ty::Closure(..) |
         ty::Generator(..) |
         ty::Adt(..) |
-        // FIXME(eddyb) producing readable type names for trait objects can result
+        // FIXME(eddyb): producing readable type names for trait objects can result
         // in problematically distinct types due to HRTB and subtyping (see #47638).
         // ty::Dynamic(..) |
         ty::Foreign(..) |

@@ -3100,7 +3100,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
     /// sometimes needed for the lint that recommends rewriting
     /// absolute paths to `crate`, so that it knows how to frame the
     /// suggestion. If you are just resolving a path like `foo::bar`
-    /// that appears...somewhere, though, then you just want
+    /// that appears... somewhere, though in that case, you just want
     /// `CrateLint::SimplePath`, which is what `smart_resolve_path`
     /// already provides.
     fn smart_resolve_path_with_crate_lint(
@@ -3169,7 +3169,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
             let code = DiagnosticId::Error(code.into());
             let mut err = this.session.struct_span_err_with_code(base_span, &base_msg, code);
 
-            // Emit help message for fake-self from other languages like `this`(javascript)
+            // Emit help message for fake-self from other languages (e.g., `this` in Javascript).
             if ["this", "my"].contains(&&*item_str.as_str())
                 && this.self_value_is_available(path[0].ident.span, span) {
                 err.span_suggestion_with_applicability(
@@ -3269,7 +3269,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                 levenshtein_worked = true;
             }
 
-            // Try context dependent help if relaxed lookup didn't work.
+            // Try context-dependent help if relaxed lookup didn't work.
             if let Some(def) = def {
                 match (def, source) {
                     (Def::Macro(..), _) => {
@@ -3472,8 +3472,8 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
             _ => report_errors(self, None)
         };
 
+        // Avoid recording definition of `A::B` in `<T as A>::B::C`.
         if let PathSource::TraitItem(..) = source {} else {
-            // Avoid recording definition of `A::B` in `<T as A>::B::C`.
             self.record_def(id, resolution);
         }
         resolution
@@ -3487,7 +3487,8 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
         debug!("self.current_type_ascription {:?}", self.current_type_ascription);
         if let Some(sp) = self.current_type_ascription.last() {
             let mut sp = *sp;
-            loop {  // try to find the `:`, bail on first non-':'/non-whitespace
+            loop {
+                // Try to find the `:`; bail on the first non-':'/non-whitespace.
                 sp = cm.next_point(sp);
                 if let Ok(snippet) = cm.span_to_snippet(sp.to(cm.next_point(sp))) {
                     debug!("snippet {:?}", snippet);
@@ -3546,7 +3547,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
         for (i, ns) in [primary_ns, TypeNS, ValueNS, /*MacroNS*/].iter().cloned().enumerate() {
             if i == 0 || ns != primary_ns {
                 match self.resolve_qpath(id, qself, path, ns, span, global_by_default, crate_lint) {
-                    // If defer_to_typeck, then resolution > no resolution,
+                    // If `defer_to_typeck`, then resolution > no resolution,
                     // otherwise full resolution > partial resolution > no resolution.
                     Some(res) if res.unresolved_segments() == 0 || defer_to_typeck =>
                         return Some(res),
@@ -3560,7 +3561,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                                .and_then(NameBinding::macro_kind) == Some(MacroKind::Bang) ||
             self.macro_use_prelude.get(&path[0].ident.name).cloned()
                                   .and_then(NameBinding::macro_kind) == Some(MacroKind::Bang)) {
-            // Return some dummy definition, it's enough for error reporting.
+            // Return some dummy definition; it's enough for error reporting.
             return Some(
                 PathResolution::new(Def::Macro(DefId::local(CRATE_DEF_INDEX), MacroKind::Bang))
             );
@@ -4012,7 +4013,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                     match rib.kind {
                         NormalRibKind | ModuleRibKind(..) | MacroDefinition(..) |
                         ForwardTyParamBanRibKind => {
-                            // Nothing to do. Continue.
+                            // Nothing to do; continue.
                         }
                         ClosureRibKind(function_id) => {
                             let prev_def = def;
@@ -4049,7 +4050,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                             return Def::Err;
                         }
                         ConstantItemRibKind => {
-                            // Still doesn't deal with upvars
+                            // Still doesn't deal with upvars.
                             if record_used {
                                 resolve_error(self, span,
                                     ResolutionError::AttemptToUseNonConstantValueInConstant);
@@ -4065,7 +4066,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                         NormalRibKind | TraitOrImplItemRibKind | ClosureRibKind(..) |
                         ModuleRibKind(..) | MacroDefinition(..) | ForwardTyParamBanRibKind |
                         ConstantItemRibKind => {
-                            // Nothing to do. Continue.
+                            // Nothing to do; continue.
                         }
                         ItemRibKind => {
                             // This was an attempt to use a type parameter outside
@@ -4244,7 +4245,6 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
     fn resolve_expr(&mut self, expr: &Expr, parent: Option<&Expr>) {
         // First, record candidate traits for this expression if it could
         // result in the invocation of a method call.
-
         self.record_candidate_traits_for_expr_if_necessary(expr);
 
         // Next, resolve the node.
@@ -4265,9 +4265,9 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                 });
                 match def {
                     None => {
-                        // Search again for close matches...
+                        // Search again for close matches.
                         // Picks the first label that is "close enough", which is not necessarily
-                        // the closest match
+                        // the closest match.
                         let close_match = self.search_label(label.ident, |rib, ident| {
                             let names = rib.bindings.iter().map(|(id, _)| &id.name);
                             find_best_match_for_name(names, &*ident.as_str(), None)
@@ -4288,7 +4288,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                     }
                 }
 
-                // visit `break` argument if any
+                // Visit `break` argument, if there is one.
                 visit::walk_expr(self, expr);
             }
 
@@ -4325,7 +4325,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                     for pat in pats {
                         this.resolve_pattern(pat, PatternSource::WhileLet, &mut bindings_list);
                     }
-                    // This has to happen *after* we determine which pat_idents are variants.
+                    // This has to happen *after* we determine which `pat_idents` are variants.
                     this.check_consistent_bindings(pats);
                     this.visit_block(block);
                     this.ribs[ValueNS].pop();
@@ -4344,7 +4344,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
 
             ExprKind::Block(ref block, label) => self.resolve_labeled_block(label, block.id, block),
 
-            // Equivalent to `visit::walk_expr` + passing some context to children.
+            // Equivalent to `visit::walk_expr` plus passing some context to children.
             ExprKind::Field(ref subexpression, _) => {
                 self.resolve_expr(subexpression, Some(expr));
             }
@@ -4387,24 +4387,24 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                 let rib_kind = ClosureRibKind(expr.id);
                 self.ribs[ValueNS].push(Rib::new(rib_kind));
                 self.label_ribs.push(Rib::new(rib_kind));
-                // Resolve arguments:
+                // Resolve the arguments.
                 let mut bindings_list = FxHashMap::default();
                 for argument in &fn_decl.inputs {
                     self.resolve_pattern(&argument.pat, PatternSource::FnParam, &mut bindings_list);
                     self.visit_ty(&argument.ty);
                 }
-                // No need to resolve return type-- the outer closure return type is
-                // FunctionRetTy::Default
+                // No need to resolve return type -- the outer closure return type is
+                // `FunctionRetTy::Default`.
 
-                // Now resolve the inner closure
+                // Now resolve the inner closure.
                 {
                     let rib_kind = ClosureRibKind(inner_closure_id);
                     self.ribs[ValueNS].push(Rib::new(rib_kind));
                     self.label_ribs.push(Rib::new(rib_kind));
                     // No need to resolve arguments: the inner closure has none.
-                    // Resolve the return type:
+                    // Resolve the return type.
                     visit::walk_fn_ret_ty(self, &fn_decl.output);
-                    // Resolve the body
+                    // Resolve the body.
                     self.visit_expr(body);
                     self.label_ribs.pop();
                     self.ribs[ValueNS].pop();
@@ -4421,7 +4421,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
     fn record_candidate_traits_for_expr_if_necessary(&mut self, expr: &Expr) {
         match expr.node {
             ExprKind::Field(_, ident) => {
-                // FIXME(#6890): Even though you can't treat a method like a
+                // FIXME(#6890): even though you can't treat a method like a
                 // field, we need to add any trait methods we find that match
                 // the field name so that we can do some nice error reporting
                 // later on in typeck.
@@ -4429,7 +4429,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                 self.trait_map.insert(expr.id, traits);
             }
             ExprKind::MethodCall(ref segment, ..) => {
-                debug!("(recording candidate traits for expr) recording traits for {}",
+                debug!("(recording candidate traits for expr) recording traits for node {}",
                        expr.id);
                 let traits = self.get_traits_containing_item(segment.ident, ValueNS);
                 self.trait_map.insert(expr.id, traits);
@@ -4654,13 +4654,13 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
         let mut worklist = vec![(self.graph_root, Vec::new())];
 
         while let Some((in_module, path_segments)) = worklist.pop() {
-            // abort if the module is already found
+            // Abort if the module is already found.
             if result.is_some() { break; }
 
             self.populate_module_if_necessary(in_module);
 
             in_module.for_each_child_stable(|ident, _, name_binding| {
-                // abort if the module is already found or if name_binding is private external
+                // Abort if the module is already found or if `name_binding` is private external.
                 if result.is_some() || !name_binding.vis.is_visible_locally() {
                     return
                 }
@@ -4675,7 +4675,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
                         };
                         result = Some((module, ImportSuggestion { path }));
                     } else {
-                        // add the module to the lookup
+                        // Add the module to the lookup.
                         if seen_modules.insert(module.def_id().unwrap()) {
                             worklist.push((module, path_segments));
                         }
@@ -4689,7 +4689,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
 
     fn collect_enum_variants(&mut self, enum_def: Def) -> Option<Vec<Path>> {
         if let Def::Enum(..) = enum_def {} else {
-            panic!("Non-enum def passed to collect_enum_variants: {:?}", enum_def)
+            panic!("non-enum def passed to collect_enum_variants: {:?}", enum_def)
         }
 
         self.find_module(enum_def).map(|(enum_module, enum_import_suggestion)| {
@@ -4711,7 +4711,7 @@ impl<'a, 'crateloader: 'a> Resolver<'a, 'crateloader> {
     }
 
     fn record_def(&mut self, node_id: NodeId, resolution: PathResolution) {
-        debug!("(recording def) recording {:?} for {}", resolution, node_id);
+        debug!("(recording def) recording {:?} for node {}", resolution, node_id);
         if let Some(prev_res) = self.def_map.insert(node_id, resolution) {
             panic!("path resolved multiple times ({:?} before, {:?} now)", prev_res, resolution);
         }

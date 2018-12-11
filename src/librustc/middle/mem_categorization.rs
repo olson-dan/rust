@@ -668,7 +668,7 @@ impl<'a, 'gcx, 'tcx> MemCategorizationContext<'a, 'gcx, 'tcx> {
                 if self.tables.is_method_call(expr) {
                     // If this is an index implemented by a method call, then it
                     // will include an implicit deref of the result.
-                    // The call to index() returns a `&T` value, which
+                    // The call to `index()` returns a `&T` value, which
                     // is an rvalue. That is what we will be
                     // dereferencing.
                     self.cat_overloaded_place(expr, base, NoteIndex)
